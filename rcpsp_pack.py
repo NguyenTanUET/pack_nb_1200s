@@ -66,7 +66,7 @@ def solve_rcpsp_with_makespan_bound(data_file, target_makespan, time_remaining):
             LogVerbosity="Quiet"
         )
 
-        return res is not None
+        return res is not None and res.is_solution()
 
     except Exception as e:
         print(f"Error solving with makespan {target_makespan}: {str(e)}")
