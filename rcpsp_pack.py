@@ -17,7 +17,7 @@ from google.cloud import storage
 import os
 
 # Thời gian tối đa cho mỗi instance
-TIME_PER_INSTANCE = 900
+TIME_PER_INSTANCE = 1200
 
 
 def solve_rcpsp_with_direct_bounds(data_file, lower_bound, upper_bound, time_limit):
