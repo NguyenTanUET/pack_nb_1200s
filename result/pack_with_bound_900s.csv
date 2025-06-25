@@ -1,0 +1,4 @@
+File name,LB,UB,Makespan,Status,Solve time (second)
+Pack001.data,9,23,9,optimal,1.10
+Pack002.data,14,32,14,optimal,2.83
+Pack003.data,10,29,10,optimal,3.49

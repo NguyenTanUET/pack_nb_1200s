@@ -3,8 +3,11 @@
 """
 RCPSP solver using linear search from upper bound down to lower bound.
 This approach tries each makespan value sequentially to find the optimal solution.
-No time limit per makespan test - only overall 1200s limit.
+No time limit per makespan test - only overall 900s limit.
 """
+
+"TODO: Tìm cách add trực tiếp bounds thành các constraint, ví dụ: Max(e1, e2,..., et) = 60"
+
 from docplex.cp.model import *
 import os
 import csv
@@ -14,24 +17,21 @@ from google.cloud import storage
 import os
 
 # Thời gian tối đa cho mỗi instance
-TIME_PER_INSTANCE = 1200
+TIME_PER_INSTANCE = 900
 
-def solve_rcpsp_with_makespan_bound(data_file, target_makespan, time_remaining):
+
+def solve_rcpsp_with_direct_bounds(data_file, lower_bound, upper_bound, time_limit):
     """
-    Solve RCPSP with fixed makespan upper bound constraint
-    Returns True if feasible, False if infeasible
-    No individual time limit - runs until solution found or time_remaining expires
+    Solve RCPSP with bounds added directly to max expression
     """
     try:
-        # Read data file
+        # Read data file (same as before)
         with open(data_file, 'r') as file:
             first_line = file.readline().split()
             NB_TASKS, NB_RESOURCES = int(first_line[0]), int(first_line[1])
-
             CAPACITIES = [int(v) for v in file.readline().split()]
             TASKS = [[int(v) for v in file.readline().split()] for i in range(NB_TASKS)]
 
-        # Extract data
         DURATIONS = [TASKS[t][0] for t in range(NB_TASKS)]
         DEMANDS = [TASKS[t][1:NB_RESOURCES + 1] for t in range(NB_TASKS)]
         SUCCESSORS = [TASKS[t][NB_RESOURCES + 2:] for t in range(NB_TASKS)]
@@ -39,39 +39,44 @@ def solve_rcpsp_with_makespan_bound(data_file, target_makespan, time_remaining):
         # Create CP model
         mdl = CpoModel()
 
-        # Create interval variables for tasks
+        # Create interval variables
         tasks = [interval_var(name=f'T{i + 1}', size=DURATIONS[i]) for i in range(NB_TASKS)]
 
         # Add precedence constraints
         for t in range(NB_TASKS):
             for s in SUCCESSORS[t]:
-                if s > 0:  # Valid successor
+                if s > 0:
                     mdl.add(end_before_start(tasks[t], tasks[s - 1]))
 
-        # Add resource capacity constraints
+        # Add resource constraints
         for r in range(NB_RESOURCES):
             resource_usage = [pulse(tasks[t], DEMANDS[t][r]) for t in range(NB_TASKS) if DEMANDS[t][r] > 0]
             if resource_usage:
                 mdl.add(sum(resource_usage) <= CAPACITIES[r])
 
-        # Create makespan and add FIXED bound constraint
-        makespan = max(end_of(t) for t in tasks)
-        mdl.add(makespan <= target_makespan)
+        # CREATE MAKESPAN VARIABLE
+        makespan = integer_var(lower_bound, upper_bound, name="makespan")
 
-        # Solve with remaining time - removed Workers and FailLimit
-        time_to_use = max(1, time_remaining)
+        # ADD BOUNDS DIRECTLY TO MAX EXPRESSION
+        mdl.add(makespan == max(end_of(t) for t in tasks))
+        mdl.add(makespan >= lower_bound)
+        mdl.add(makespan <= upper_bound)
 
-        res = mdl.solve(
-            TimeLimit=time_to_use,
-            LogVerbosity="Quiet"
-        )
+        # ADD OBJECTIVE TO MINIMIZE MAKESPAN
+        mdl.add(minimize(makespan))
 
-        return res is not None and res.is_solution()
+        # Solve
+        res = mdl.solve(TimeLimit=time_limit, LogVerbosity="Quiet")
+
+        if res and res.is_solution():
+            actual_makespan = res.get_value(makespan)
+            return actual_makespan
+        else:
+            return None
 
     except Exception as e:
-        print(f"Error solving with makespan {target_makespan}: {str(e)}")
-        return False
-
+        print(f"Error: {str(e)}")
+        return None
 
 def solve_rcpsp_linear_search(data_file):
     """
@@ -92,9 +97,6 @@ def solve_rcpsp_linear_search(data_file):
                 LOWER_BOUND = int(first_line[2])
                 UPPER_BOUND = int(first_line[3])
                 print(f"Bounds from file: LB={LOWER_BOUND}, UB={UPPER_BOUND}")
-            elif len(first_line) == 3:
-                LOWER_BOUND = UPPER_BOUND = int(first_line[2])
-                print(f"Single bound from file: {LOWER_BOUND}")
             else:
                 print("No bounds specified in file")
                 return (None, None, None, "infeasible", time.time() - start_time)
@@ -127,7 +129,7 @@ def solve_rcpsp_linear_search(data_file):
 
             # Test if this makespan is feasible
             attempt_start = time.time()
-            is_feasible = solve_rcpsp_with_makespan_bound(data_file, makespan, time_remaining)
+            is_feasible = solve_rcpsp_with_direct_bounds(data_file, LOWER_BOUND, UPPER_BOUND, time_remaining)
             attempt_time = time.time() - attempt_start
 
             print(f"    Attempt took: {attempt_time:.1f}s")
@@ -180,7 +182,7 @@ def main():
     # Define directories
     data_dir = Path("data")
     result_dir = Path("result")
-    output_file = result_dir / "pack_with_bound_1200s.csv"
+    output_file = result_dir / "pack_with_bound_900s.csv"
 
     # Create result directory if it doesn't exist
     os.makedirs(result_dir, exist_ok=True)
@@ -259,8 +261,8 @@ def main():
     client = storage.Client()
     bucket = client.bucket(bucket_name)
 
-    local_path = "result/pack_with_bound_1200s.csv"
-    blob_name = f"results/{os.path.basename(local_path)}"  # ví dụ "results/pack_with_bound_1200s.csv"
+    local_path = "result/pack_with_bound_900s.csv"
+    blob_name = f"results/{os.path.basename(local_path)}"  # ví dụ "results/pack_with_bound_900s.csv"
 
     blob = bucket.blob(blob_name)
     blob.upload_from_filename(local_path)
